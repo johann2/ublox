@@ -143,9 +143,17 @@ fn main() {
         .unwrap();
     device.wait_for_ack::<CfgMsgAllPorts>().unwrap();
 
+    device
+        .write_all(
+            &CfgMsgAllPortsBuilder::set_rate_for::<EsfStatus>([1, 1, 1, 1, 1, 1])
+                .into_packet_bytes(),
+        )
+        .unwrap();
+    device.wait_for_ack::<CfgMsgAllPorts>().unwrap();
+
     // Send a packet request for the MonVer packet
     device
-        .write_all(&UbxPacketRequest::request_for::<MonVer>().into_packet_bytes())
+        .write_all(&UbxPacketRequest::request_for::<EsfStatus>().into_packet_bytes())
         .unwrap();
 
     // Start reading data
@@ -178,6 +186,20 @@ fn main() {
                         let time: DateTime<Utc> = (&sol).try_into().unwrap();
                         println!("Time: {:?}", time);
                     }
+                }
+                PacketRef::EsfStatus(esf)=> {
+                    println!("Fusion mode:{:?}",esf.fusion_mode());
+                    println!("Sensor count:{}",esf.num_sens());
+                    for sensor in esf.extension() {
+                        println!("---");
+                        println!("Sensor type:        {}",sensor.sensor_type());
+                        println!("Ready:              {}",sensor.ready());
+                        println!("Used:               {}",sensor.used());
+                        println!("Calibration status: {:?}",sensor.calibration_status());
+                        println!("Frequency: {}",sensor.frequency());
+                        println!("Faults: {:#08b}",sensor.frequency());
+                    }
+
                 }
                 _ => {}
             }

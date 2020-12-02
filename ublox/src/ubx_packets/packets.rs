@@ -12,6 +12,7 @@ use ublox_derive::{
     define_recv_packets, ubx_extend, ubx_extend_bitflags, ubx_packet_recv, ubx_packet_recv_send,
     ubx_packet_send,
 };
+use bitflags::_core::marker::PhantomData;
 
 /// Geodetic Position Solution
 #[ubx_packet_recv]
@@ -313,6 +314,112 @@ struct NavSolution {
     num_sv: u8,
     reserved2: [u8; 4],
 }
+
+#[ubx_packet_recv]
+#[ubx(class = 0x10, id = 0x10, max_payload_len = 1024)]
+pub struct EsfStatus {
+    itow: u32,
+    version:u8,
+   // #[ubs(map_type=EsfStatusInitStatus)]
+    init_status:u16,
+    reserved1:[u8;5],
+    #[ubs(map_type=EsfStatusFusionMode)]
+    fusion_mode:u8,
+    reserved2:[u8;2],
+    num_sens:u8,
+    /// Extended software information strings
+    #[ubx(map_type = impl Iterator<Item=SensorStatus<'a>>, may_fail,
+    from = esf_status::extension_to_iter,
+    is_valid = esf_status::is_extension_valid)]
+    extension: [u8; 0],
+}
+
+mod esf_status {
+    use super::{SensorStatus};
+
+    pub(crate) fn is_extension_valid(payload: &[u8]) -> bool {
+        payload.len() % 4 == 0
+    }
+
+    pub(crate) fn extension_to_iter<'a>(payload: &'a [u8]) -> impl Iterator<Item = SensorStatus<'a>>  {
+        payload.chunks(4).map(|x| {
+            let s=SensorStatus(x);
+            s
+        })
+    }
+}
+
+#[ubx_extend]
+#[ubx(from, rest_reserved)]
+#[repr(u8)]
+#[derive(Debug, Copy, Clone, PartialEq)]
+pub enum EsfStatusFusionMode {
+    Initializing=0,
+    Fusion=1,
+    SuspendedFusion=2,
+    Disabled=3,
+}
+
+#[derive(Copy, Clone, PartialEq)]
+pub struct SensorStatus<'a> (&'a [u8]);
+
+#[derive(Debug, Copy, Clone, PartialEq)]
+pub enum CalibrationStatus {
+    NotCalibrated=0,
+    Calibrating=1,
+    Calibrated=2,
+}
+
+const SENS_STATUS1_OFFSET:usize=0;
+const SENS_STATUS2_OFFSET:usize=1;
+const SENS_FREQ_OFFSET:usize=2;
+const SENS_FAULTS_OFFSET:usize=3;
+
+impl SensorStatus<'_> {
+    pub fn sensor_type(&self)->u8 {
+        self.0[SENS_STATUS1_OFFSET]&0b00111111
+    }
+    pub fn ready(&self)->bool {
+        self.0[SENS_STATUS1_OFFSET]&0b10000000!=0
+    }
+    pub fn used(&self)->bool {
+        self.0[SENS_STATUS1_OFFSET]&0b01000000!=0
+    }
+    pub fn calibration_status(&self)->CalibrationStatus {
+        match self.0[SENS_STATUS2_OFFSET]&0b00000011 {
+            0=>CalibrationStatus::NotCalibrated,
+            1=>CalibrationStatus::Calibrating,
+            2=>CalibrationStatus::Calibrated,
+            3=>CalibrationStatus::Calibrated,
+            _=>unreachable!(),
+        }
+    }
+    pub fn frequency(&self)->u8 {
+        self.0[SENS_FREQ_OFFSET]
+    }
+    pub fn faults(&self)->u8 {
+        self.0[SENS_FAULTS_OFFSET]
+    }
+
+}
+
+#[repr(u8)]
+#[ubx_extend_bitflags]
+#[ubx(from, rest_reserved)]
+bitflags! {
+    /// Navigation Status Flags
+    pub struct SensStatusFaults: u8 {
+        /// Bad measurements detected
+        const BAD_MEAS = 1;
+        /// Bad measurement time-tags detected
+        const BAD_TTAG = 2;
+        /// Missing or time-misaligned measurements detected
+        const MISSING_MEAS = 4;
+        /// THigh measurement noise-level detected
+        const NOISY_MEAS = 8;
+    }
+}
+
 
 /// GPS fix Type
 #[ubx_extend]
@@ -1092,6 +1199,7 @@ define_recv_packets!(
         CfgPrtSpi,
         CfgPrtUart,
         CfgNav5,
-        MonVer
+        MonVer,
+        EsfStatus
     }
 );
